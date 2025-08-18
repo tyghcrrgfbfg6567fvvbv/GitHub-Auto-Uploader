@@ -23,6 +23,23 @@ A powerful and user-friendly Python tool to automatically upload folders or ZIP 
 
 ---
 
+## ⬇️ Installation 
+
+- Install git if not installed 
+
+```bash
+pkg install git
+```
+
+
+- Download the repository
+
+
+```bash
+git clone https://github.com/Mr-Risov/GitHub-Auto-Uploader.git
+```
+
+
 ## 📦 Requirements
 
 - Python 3.8 or newer
