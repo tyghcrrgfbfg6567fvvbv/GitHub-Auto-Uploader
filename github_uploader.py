@@ -18,8 +18,7 @@ from rich.progress import track, Progress, BarColumn, TextColumn, TimeRemainingC
 from rich.table import Table
 from rich import print
 from rich.box import ROUNDED, MINIMAL
-from github import Github
-from github import Auth
+from github import Github, Auth, UnknownObjectException
 
 console = Console()
 
@@ -174,15 +173,18 @@ def create_repo(g, username, repo_name, private):
         repo = user.get_repo(repo_name)
         console.print(f"[yellow]✓ Repository '{repo_name}' already exists.[/yellow]")
         return repo
-    except Exception as e:
-        console.print(f"[yellow]⚠️  Repository '{repo_name}' creation failed or already exists: {str(e)}[/yellow]")
+    except UnknownObjectException:
+        console.print(f"[yellow]⚠️  Repository '{repo_name}' not found. Creating it now...[/yellow]")
         try:
-            repo = user.get_repo(repo_name)
-            console.print(f"[yellow]✓ Repository '{repo_name}' already exists.[/yellow]")
+            repo = user.create_repo(repo_name, private=private)
+            console.print(f"[green]✓ Repository '{repo_name}' created successfully.[/green]")
             return repo
-        except Exception as get_repo_error:
-            console.print(f"[bold red]❌ Failed to access repository '{repo_name}': {str(get_repo_error)}[/bold red]")
+        except Exception as create_error:
+            console.print(f"[bold red]❌ Failed to create repository '{repo_name}': {str(create_error)}[/bold red]")
             sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]❌ Failed to access repository '{repo_name}': {str(e)}[/bold red]")
+        sys.exit(1)
 
 def setup_git(folder, repo_url, commit_message):
     # Check if the folder exists before proceeding
