@@ -1,0 +1,5 @@
+rich==13.7.0
+PyGithub==2.8.1
+requests==2.31.0
+inquirer==3.2.4
+gnureadline==8.1.2; sys_platform == 'darwin'
