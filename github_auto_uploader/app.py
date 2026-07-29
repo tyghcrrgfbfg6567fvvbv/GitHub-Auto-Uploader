@@ -28,6 +28,12 @@ from .services.security import (
     redact_sensitive_text,
     scan_for_secrets,
 )
+from .services.release_notes import (
+    ReleasePlan,
+    compare_readmes,
+    read_local_readme,
+    suggestion_text,
+)
 from .ui.menu import (
     MenuAction,
     RepositoryAction,
@@ -777,14 +783,35 @@ def show_repository_release(repo):
         console.print(f"[yellow]⚠️ Could not load release information: {str(e)}[/yellow]")
     return None
 
-def format_release_message(new_functions, bug_fixes):
+def _release_bullets(value, fallback):
+    """Convert editable semicolon/newline text into Markdown bullets."""
+    items = [
+        item.strip().lstrip("-*+ ")
+        for item in re.split(r"[;\n]+", str(value or ""))
+        if item.strip().lstrip("-*+ ")
+    ]
+    return "\n".join(f"- {item}" for item in items) or f"- {fallback}"
+
+
+def format_release_message(new_functions, bug_fixes, removed_functions):
     """Build a consistent GitHub release message."""
     return (
         "## New Functions\n"
-        f"- {new_functions.strip()}\n\n"
+        f"{_release_bullets(new_functions, 'No new functions detected')}\n\n"
         "## Bug Fixes\n"
-        f"- {bug_fixes.strip()}"
+        f"{_release_bullets(bug_fixes, 'No bug fixes detected')}\n\n"
+        "## Removed Functions\n"
+        f"{_release_bullets(removed_functions, 'No removed functions detected')}"
     )
+
+
+def fetch_remote_readme(repo):
+    """Fetch the README currently stored on the repository's default branch."""
+    try:
+        readme = repo.get_readme()
+        return readme.decoded_content.decode("utf-8", errors="ignore"), True
+    except Exception:
+        return "", False
 
 def fetch_repository_version_tags(repo):
     """Fetch existing release and Git tag names without loading unlimited pages."""
@@ -828,17 +855,26 @@ def suggest_next_version_tag(existing_versions):
         return f"v{major}.{int(minor)}.{int(patch) + 1}"
     return "v1.0.0"
 
-def create_archive_release(repo):
-    """Create a release of the current remote state before overwriting"""
+def prepare_repository_release(repo, local_folder):
+    """Compare READMEs and prepare editable release details before upload."""
     try:
         try:
             repo.get_commits().get_page(0)
-        except:
-            return
+        except Exception:
+            print_error("The remote repository has no commit to compare yet.")
+            return None
 
-        console.print("\n[cyan]📦 Archiving current remote version...[/cyan]")
+        console.print("\n[cyan]📦 Comparing remote and local README files...[/cyan]")
         existing_versions = fetch_repository_version_tags(repo)
         suggested_version = suggest_next_version_tag(existing_versions)
+        old_readme, old_found = fetch_remote_readme(repo)
+        new_readme, new_found = read_local_readme(local_folder)
+        comparison = compare_readmes(
+            old_readme,
+            new_readme,
+            old_found=old_found,
+            new_found=new_found,
+        )
         render_box(
             "REPOSITORY VERSION HISTORY",
             [
@@ -849,10 +885,31 @@ def create_archive_release(repo):
                 BoxRow("Suggested Next", suggested_version, "success"),
             ],
         )
+        render_box(
+            "README CHANGE ANALYSIS",
+            [
+                BoxRow("Remote README", "Found" if old_found else "Not found"),
+                BoxRow("Local README", "Found" if new_found else "Not found"),
+                BoxRow("Added Lines", str(comparison.added_lines), "success"),
+                BoxRow("Removed Lines", str(comparison.removed_lines), "warning"),
+                BoxRow(
+                    "New Functions",
+                    suggestion_text(comparison.new_functions, "None detected"),
+                ),
+                BoxRow(
+                    "Bug Fixes",
+                    suggestion_text(comparison.bug_fixes, "None detected"),
+                ),
+                BoxRow(
+                    "Removed Functions",
+                    suggestion_text(comparison.removed_functions, "None detected"),
+                ),
+            ],
+        )
 
         existing_normalized = {version.casefold() for version in existing_versions}
         while True:
-            version = Prompt.ask("Enter new archive version tag", default=suggested_version).strip()
+            version = Prompt.ask("Enter new release version tag", default=suggested_version).strip()
             if not version:
                 print_error("Version tag cannot be empty.")
                 continue
@@ -861,36 +918,67 @@ def create_archive_release(repo):
                 continue
             break
 
-        release_title = Prompt.ask("Enter release title", default=f"Release {version}")
+        release_title = Prompt.ask(
+            "Release title",
+            default=comparison.suggested_title(version),
+        ).strip()
         new_functions = Prompt.ask(
-            "Describe new functions",
-            default="No new functions listed"
-        )
+            "New functions (semicolon separates items)",
+            default=suggestion_text(comparison.new_functions, "No new functions detected"),
+        ).strip()
         bug_fixes = Prompt.ask(
-            "Describe bug fixes",
-            default="No bug fixes listed"
+            "Bug fixes (semicolon separates items)",
+            default=suggestion_text(comparison.bug_fixes, "No bug fixes detected"),
+        ).strip()
+        removed_functions = Prompt.ask(
+            "Removed functions (semicolon separates items)",
+            default=suggestion_text(
+                comparison.removed_functions,
+                "No removed functions detected",
+            ),
+        ).strip()
+        release_message = format_release_message(
+            new_functions,
+            bug_fixes,
+            removed_functions,
         )
-        release_message = format_release_message(new_functions, bug_fixes)
+        render_box(
+            f"{version} RELEASE PREVIEW",
+            [
+                BoxRow("Title", release_title),
+                BoxRow("Message", release_message),
+            ],
+        )
+        return ReleasePlan(version, release_title, release_message)
+    except Exception as e:
+        console.print(f"[yellow]⚠️ Could not prepare release: {str(e)}[/yellow]")
+        return None
 
+
+def publish_repository_release(repo, release_plan):
+    """Publish a prepared release after the new repository content is pushed."""
+    try:
         release = repo.create_git_release(
-            tag=version,
-            name=release_title,
-            message=release_message,
+            tag=release_plan.tag,
+            name=release_plan.title,
+            message=release_plan.message,
             draft=False,
             prerelease=False
         )
-        print_success(f"Archive release '{version}' created!")
+        print_success(f"Release '{release_plan.tag}' created from the uploaded code!")
         render_box(
-            f"{version} RELEASE MESSAGE",
+            f"{release_plan.tag} RELEASE MESSAGE",
             [
-                BoxRow("Title", release.title or release_title),
-                BoxRow("Message", release_message),
+                BoxRow("Title", release.title or release_plan.title),
+                BoxRow("Message", release_plan.message),
             ],
             border_style="#39FF88",
             title_style="success",
         )
+        return True
     except Exception as e:
-        console.print(f"[yellow]⚠️ Could not create archive: {str(e)}[/yellow]")
+        console.print(f"[yellow]⚠️ Upload succeeded, but release creation failed: {str(e)}[/yellow]")
+        return False
 
 def show_system_info(username):
     render_box(
@@ -1065,16 +1153,22 @@ def main():
                     # Execute
                     try:
                         repo_exists = False
+                        release_plan = None
                         try:
                             repo = user.get_repo(repo_name)
                             repo_exists = True
                             print_success(f"Targeting: {repo_name}")
                             show_repository_release(repo)
                             
-                            archive_q = [inquirer.List('archive', message="Archive current remote as Release?", choices=['Yes', 'No'], default='No')]
-                            arc_ans = inquirer.prompt(archive_q)
-                            if arc_ans and arc_ans['archive'] == 'Yes':
-                                create_archive_release(repo)
+                            release_q = [inquirer.List(
+                                'release',
+                                message="Create a release from README changes after upload?",
+                                choices=['Yes', 'No'],
+                                default='No',
+                            )]
+                            release_ans = inquirer.prompt(release_q)
+                            if release_ans and release_ans['release'] == 'Yes':
+                                release_plan = prepare_repository_release(repo, folder_path)
                         except UnknownObjectException:
                             print_step(f"Creating new repository: {repo_name}...")
                             repo = user.create_repo(repo_name, private=not is_public)
@@ -1087,6 +1181,8 @@ def main():
                             clean_repo_url,
                             commit_msg,
                         ):
+                            if release_plan:
+                                publish_repository_release(repo, release_plan)
                             print_success(f"Upload Complete: https://github.com/{username}/{repo_name}")
                             input("\nPress Enter to return...")
                             return main() # Full reset

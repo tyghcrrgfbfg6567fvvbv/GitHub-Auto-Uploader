@@ -7,6 +7,8 @@ from blessed import Terminal
 from inquirer import errors, themes
 from inquirer.render.console import ConsoleRender
 from inquirer.render.console._list import List as InquirerListRenderer
+from inquirer.render.console.base import MAX_OPTIONS_DISPLAYED_AT_ONCE
+from readchar import key
 
 
 class MenuAction(str, Enum):
@@ -21,10 +23,9 @@ class MenuAction(str, Enum):
 
 
 class RepositoryAction(str, Enum):
-    SEARCH = "__search_repositories__"
-    CLEAR_SEARCH = "__clear_repository_search__"
     CREATE = "__create_repository__"
     BACK = "__back_from_repositories__"
+    NO_MATCH = "__no_matching_repository__"
 
 
 class ShortcutListRenderer(InquirerListRenderer):
@@ -42,6 +43,88 @@ class ShortcutConsoleRender(ConsoleRender):
     def render_factory(self, question_type):
         if question_type == "list":
             return ShortcutListRenderer
+        return super().render_factory(question_type)
+
+
+class SearchableRepositoryListRenderer(InquirerListRenderer):
+    """Filter repository choices immediately as printable keys are pressed."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.query = ""
+        self.all_repositories = self.question.repository_names
+        self.allow_create = self.question.allow_create
+        self.base_message = self.question.repository_message
+        self.visible_count = len(self.all_repositories)
+        self._refresh_choices()
+        self.option_area_height = min(
+            MAX_OPTIONS_DISPLAYED_AT_ONCE,
+            len(self.question.choices),
+        )
+
+    def _refresh_choices(self):
+        folded_query = self.query.casefold()
+        visible = [
+            name
+            for name in self.all_repositories
+            if not folded_query or folded_query in name.casefold()
+        ]
+        self.visible_count = len(visible)
+        choices = [(name, name) for name in visible]
+        if self.query and not visible:
+            choices.append((f"No matches for '{self.query}'", RepositoryAction.NO_MATCH))
+        if self.allow_create:
+            choices.append(("Create New Repository", RepositoryAction.CREATE))
+        choices.append(("Back", RepositoryAction.BACK))
+        self.question._choices = choices
+        self.current = 0
+
+    def get_header(self):
+        search = self.query or "type to filter"
+        return (
+            f"{self.base_message} ({self.visible_count}/{len(self.all_repositories)})"
+            f" • Search: {search}"
+        )
+
+    def get_hint(self):
+        return "Type to filter • Backspace edit • Esc clear/back • Ctrl+Q back"
+
+    def get_options(self):
+        """Clear rows left behind when live filtering makes the list shorter."""
+        rendered_options = list(super().get_options())
+        yield from rendered_options
+        for _index in range(self.option_area_height - len(rendered_options)):
+            yield "", " ", self.theme.List.unselected_color
+
+    def process_input(self, pressed):
+        if pressed == "\x11":  # Ctrl+Q
+            raise errors.EndOfInput(RepositoryAction.BACK)
+        if pressed == key.ESC:
+            if self.query:
+                self.query = ""
+                self._refresh_choices()
+                return
+            raise errors.EndOfInput(RepositoryAction.BACK)
+        if pressed in (key.BACKSPACE, key.DELETE):
+            if self.query:
+                self.query = self.query[:-1]
+                self._refresh_choices()
+            return
+        if pressed == key.ENTER:
+            value = self.question.choices[self.current]
+            if getattr(value, "value", value) == RepositoryAction.NO_MATCH:
+                return
+        if isinstance(pressed, str) and len(pressed) == 1 and pressed.isprintable():
+            self.query += pressed
+            self._refresh_choices()
+            return
+        return super().process_input(pressed)
+
+
+class RepositoryConsoleRender(ConsoleRender):
+    def render_factory(self, question_type):
+        if question_type == "list":
+            return SearchableRepositoryListRenderer
         return super().render_factory(question_type)
 
 
@@ -84,77 +167,23 @@ def select_main_action():
     return answers["action"] if answers else MenuAction.EXIT
 
 
-def _prompt_repository_query(current_query=""):
-    question = inquirer.Text(
-        "query",
-        message="Repository search (name contains)",
-        default=current_query or None,
+def select_repository(repositories, *, message="Select repository", allow_create=False):
+    """Select a repository with immediate case-insensitive type-to-filter."""
+    all_repositories = sorted(set(repositories), key=str.casefold)
+    question = inquirer.List(
+        "repository",
+        message=message,
+        choices=[],
+        carousel=True,
     )
+    question.repository_names = all_repositories
+    question.repository_message = message
+    question.allow_create = allow_create
+    question.hints = {}
     answers = inquirer.prompt(
         [question],
-        render=ShortcutConsoleRender(theme=_cyber_theme()),
+        render=RepositoryConsoleRender(theme=_cyber_theme()),
         raise_keyboard_interrupt=True,
     )
-    return answers["query"].strip() if answers else ""
-
-
-def select_repository(repositories, *, message="Select repository", allow_create=False):
-    """Search and select a repository with keyboard shortcuts.
-
-    `/` or `S` starts a case-insensitive search, `R` clears the current filter,
-    `Q` returns to the previous screen, and arrows/Enter select normally.
-    """
-    all_repositories = sorted(set(repositories), key=str.casefold)
-    query = ""
-
-    while True:
-        if query:
-            visible_repositories = [
-                name for name in all_repositories if query.casefold() in name.casefold()
-            ]
-        else:
-            visible_repositories = all_repositories
-
-        choices = [("Search repositories  [/ or S]", RepositoryAction.SEARCH)]
-        if query:
-            choices.append((f"Clear search: {query}  [R]", RepositoryAction.CLEAR_SEARCH))
-        if allow_create:
-            choices.append(("Create New Repository", RepositoryAction.CREATE))
-        if visible_repositories:
-            choices.extend((name, name) for name in visible_repositories)
-        else:
-            choices.append((f"No matches for '{query}' — search again", RepositoryAction.SEARCH))
-        choices.append(("Back", RepositoryAction.BACK))
-
-        filter_label = f" • filter: {query}" if query else ""
-        question = inquirer.List(
-            "repository",
-            message=(
-                f"{message} ({len(visible_repositories)}/{len(all_repositories)})"
-                f"{filter_label}  [Q back]"
-            ),
-            choices=choices,
-            carousel=True,
-        )
-        question.shortcuts = {
-            "q": RepositoryAction.BACK,
-            "s": RepositoryAction.SEARCH,
-            "/": RepositoryAction.SEARCH,
-            "r": RepositoryAction.CLEAR_SEARCH,
-        }
-        answers = inquirer.prompt(
-            [question],
-            render=ShortcutConsoleRender(theme=_cyber_theme()),
-            raise_keyboard_interrupt=True,
-        )
-        selection = answers["repository"] if answers else RepositoryAction.BACK
-
-        if selection == RepositoryAction.SEARCH:
-            query = _prompt_repository_query(query)
-            continue
-        if selection == RepositoryAction.CLEAR_SEARCH:
-            query = ""
-            continue
-        if selection == RepositoryAction.BACK:
-            return None
-        return selection
+    selection = answers["repository"] if answers else RepositoryAction.BACK
+    return None if selection == RepositoryAction.BACK else selection
