@@ -88,13 +88,18 @@ Updates are never forced over local work. Installation is allowed only when the 
 - Git version control system.
 - A GitHub personal access token with permission to manage the selected repositories.
 
-### Quick Install (Run Anywhere via `github`)
+### ⚡ Quick Install (One-Line Curl)
 
-Run the automated installer to set up the tool globally into `~/.Github-Auto-Uploader`:
+Install or update with a single command:
 
 ```bash
-git clone https://github.com/Mr-Risov/GitHub-Auto-Uploader.git ~/.Github-Auto-Uploader
-cd ~/.Github-Auto-Uploader && ./install.sh
+curl -sSL https://raw.githubusercontent.com/Mr-Risov/GitHub-Auto-Uploader/main/install.sh | bash
+```
+
+Or with `wget`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/Mr-Risov/GitHub-Auto-Uploader/main/install.sh | bash
 ```
 
 Once installed, simply type `github` in ANY project directory:
@@ -104,6 +109,15 @@ github
 ```
 
 > **Typo Tolerant**: Common typos like `gthub`, `gihub`, `gitub`, or `ghub` automatically prompt or launch `github`!
+
+### Git Clone Install
+
+If you prefer to clone manually:
+
+```bash
+git clone https://github.com/Mr-Risov/GitHub-Auto-Uploader.git ~/.Github-Auto-Uploader
+cd ~/.Github-Auto-Uploader && ./install.sh
+```
 
 ### Manual Setup
 

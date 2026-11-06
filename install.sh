@@ -42,6 +42,16 @@ if [ ! -f "$INSTALL_DIR/config.json" ]; then
     done
 fi
 
+# Ensure Python dependencies are installed
+echo "==> Checking and installing Python dependencies..."
+if [ -x "/data/data/com.termux/files/home/myenv/bin/pip" ]; then
+    /data/data/com.termux/files/home/myenv/bin/pip install -r "$INSTALL_DIR/requirements.txt" --quiet || true
+elif command -v pip3 >/dev/null 2>&1; then
+    pip3 install -r "$INSTALL_DIR/requirements.txt" --break-system-packages 2>/dev/null || pip3 install -r "$INSTALL_DIR/requirements.txt" 2>/dev/null || true
+elif command -v pip >/dev/null 2>&1; then
+    pip install -r "$INSTALL_DIR/requirements.txt" 2>/dev/null || true
+fi
+
 # Create launcher script
 LAUNCHER_CONTENT='#!/usr/bin/env bash
 export GITHUB_UPLOADER_CWD="$(pwd -P 2>/dev/null || pwd)"
