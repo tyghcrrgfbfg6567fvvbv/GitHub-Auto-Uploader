@@ -44,7 +44,7 @@ from .ui.renderer import BoxRow, console, render_box
 
 # ==================== UI HELPERS ====================
 
-def print_header(update_status=None):
+def print_header(show_upstream=False, update_status=None):
     if console.is_terminal:
         console.clear()
 
@@ -56,28 +56,25 @@ def print_header(update_status=None):
     )
     render_box(None, [product_name, product_meta])
 
-    if update_status and update_status.release:
-        release_title = f"UPSTREAM {update_status.release.tag}"
-        release_lines = [
-            BoxRow("Release", update_status.release.title, "brand"),
-            BoxRow("Update Status", update_status.status_text),
-            BoxRow("Release Notes", update_status.release.notes),
-        ]
-    elif update_status:
-        release_title = "UPSTREAM STATUS"
-        release_lines = [
-            BoxRow("Local Revision", update_status.local_revision),
-            BoxRow("Update Status", update_status.status_text),
-            BoxRow("Details", update_status.error or "Release metadata is unavailable."),
-        ]
-    else:
-        release_title = "UPSTREAM STATUS"
-        release_lines = [BoxRow("Status", "Checking GitHub for release information...")]
-
-    render_box(
-        release_title,
-        release_lines,
-    )
+    if show_upstream and update_status:
+        if update_status.release:
+            release_title = f"UPSTREAM {update_status.release.tag}"
+            release_lines = [
+                BoxRow("Release", update_status.release.title, "brand"),
+                BoxRow("Update Status", update_status.status_text),
+                BoxRow("Release Notes", update_status.release.notes),
+            ]
+        else:
+            release_title = "UPSTREAM STATUS"
+            release_lines = [
+                BoxRow("Local Revision", update_status.local_revision),
+                BoxRow("Update Status", update_status.status_text),
+                BoxRow("Details", update_status.error or "Release metadata is unavailable."),
+            ]
+        render_box(
+            release_title,
+            release_lines,
+        )
 
 def print_step(message):
     console.print()
@@ -1040,27 +1037,27 @@ def offer_upstream_update(update_status):
 # ==================== MAIN FLOW ====================
 
 def main():
-    update_status = refresh_upstream_status()
-    print_header(update_status)
     check_git_installed()
     config = load_config()
     ensure_accounts_config(config)
     
     username, token = get_active_account(config)
     if not token or not username:
+        print_header()
         username, token = prompt_for_github_account("Initial Authentication Setup")
         save_account(config, username, token)
     
     g = Github(auth=Auth.Token(token))
+    update_status = None
 
     while True:
-        print_header(update_status)
+        print_header()
         show_system_info(username)
         render_box(
             "MAIN MENU",
             [
                 Text(
-                    "↑/↓ navigate • Enter select • Q quit • R refresh updates",
+                    "↑/↓ navigate • Enter select • Q quit • R refresh",
                     style="muted",
                     justify="center",
                 )
@@ -1100,99 +1097,122 @@ def main():
             continue
             
         # --- UPLOAD FLOW ---
-        while True: # Repo selection loop
+        while True:
             try:
                 user = g.get_user()
+                current_dir = os.path.abspath(os.environ.get("GITHUB_UPLOADER_CWD") or os.getcwd())
+                folder_name = os.path.basename(current_dir)
+
+                # Step 1: Prompt to upload current folder or select another
+                folder_confirm_q = [
+                    inquirer.List(
+                        'folder_choice',
+                        message=f"Upload this folder: '{folder_name}' ({current_dir})?",
+                        choices=[
+                            (f"📁 Upload this folder: '{folder_name}'", "current"),
+                            ("🔍 Choose another folder / Enter path", "choose"),
+                            ("🔙 Back to Main Menu", "back"),
+                        ],
+                        carousel=True,
+                    )
+                ]
+                folder_ans = inquirer.prompt(folder_confirm_q)
+                if not folder_ans or folder_ans['folder_choice'] == 'back':
+                    break
+
+                target_folder = None
+                if folder_ans['folder_choice'] == 'current':
+                    target_folder = current_dir
+                else:
+                    setup_tab_completion()
+                    console.print("\n[bold cyan]📁 Enter folder path (Press TAB to autocomplete) or folder name to search:[/bold cyan]")
+                    try:
+                        folder_input = input("> ").strip()
+                    except EOFError:
+                        break
+                    if not folder_input:
+                        continue
+                    if os.path.exists(folder_input) and os.path.isdir(folder_input):
+                        target_folder = os.path.abspath(folder_input)
+                    else:
+                        target_folder = auto_detect_folder(folder_input)
+
+                if not target_folder or not os.path.isdir(target_folder):
+                    print_error("Invalid directory.")
+                    input("\nPress Enter to continue...")
+                    continue
+
+                # Step 2: Select repository to upload to
+                suggested_repo_name = os.path.basename(target_folder)
                 with console.status("[blue]Fetching your repositories...[/blue]"):
                     existing_repos = [repo.name for repo in user.get_repos()]
-                
+
                 repo_selection = select_repository(
                     existing_repos,
-                    message="Select repository to upload",
+                    message=f"Select repository for '{suggested_repo_name}'",
                     allow_create=True,
                 )
                 if repo_selection is None:
-                    break
+                    # Backed out of repo selection, loops back to folder prompt
+                    continue
 
                 repo_name = repo_selection
                 if repo_selection == RepositoryAction.CREATE:
-                    repo_name = Prompt.ask("\n📦 Enter new repository name")
-                
-                # Folder selection loop
-                while True:
-                    current_dirs = [d for d in os.listdir('.') if os.path.isdir(d) and not d.startswith('.')]
-                    folder_choices = ["📁 Manual Entry / Search", "🔙 Back to Repo Selection"] + sorted(current_dirs)
-                    
-                    folder_q = [inquirer.List('folder', message="Select folder", choices=folder_choices, carousel=True)]
-                    folder_ans = inquirer.prompt(folder_q)
-                    if not folder_ans or "Back" in folder_ans['folder']: break
-                    
-                    folder_selection = folder_ans['folder']
-                    folder_path = None
-                    
-                    if "Manual Entry" in folder_selection:
-                        setup_tab_completion()
-                        console.print("\n[bold cyan]📁 Enter path (Press TAB to autocomplete):[/bold cyan]")
-                        try: folder_input = input("> ").strip()
-                        except EOFError: break
-                        if os.path.exists(folder_input): folder_path = os.path.abspath(folder_input)
-                        else: folder_path = auto_detect_folder(folder_input)
-                    else:
-                        folder_path = os.path.abspath(folder_selection)
-                        
-                    if not folder_path or not os.path.isdir(folder_path):
-                        print_error("Invalid directory.")
-                        continue
-                    
-                    # Final settings
-                    vis_q = [inquirer.List('visibility', message="Visibility", choices=['Public', 'Private'], default='Public')]
-                    vis_ans = inquirer.prompt(vis_q)
-                    is_public = vis_ans['visibility'] == "Public"
-                    commit_msg = Prompt.ask("Enter commit message", default="Upload via Auto Uploader")
-                    
-                    # Execute
+                    repo_name = Prompt.ask("\n📦 Enter new repository name", default=suggested_repo_name)
+                    if not repo_name.strip():
+                        repo_name = suggested_repo_name
+
+                # Step 3: Visibility and commit message
+                vis_q = [inquirer.List('visibility', message="Visibility", choices=['Public', 'Private'], default='Public')]
+                vis_ans = inquirer.prompt(vis_q)
+                if not vis_ans:
+                    continue
+                is_public = vis_ans['visibility'] == "Public"
+                commit_msg = Prompt.ask("Enter commit message", default="Upload via Auto Uploader")
+
+                # Step 4: Execute upload
+                try:
+                    repo_exists = False
+                    release_plan = None
                     try:
-                        repo_exists = False
-                        release_plan = None
-                        try:
-                            repo = user.get_repo(repo_name)
-                            repo_exists = True
-                            print_success(f"Targeting: {repo_name}")
-                            show_repository_release(repo)
-                            
-                            release_q = [inquirer.List(
-                                'release',
-                                message="Create a release from README changes after upload?",
-                                choices=['Yes', 'No'],
-                                default='No',
-                            )]
-                            release_ans = inquirer.prompt(release_q)
-                            if release_ans and release_ans['release'] == 'Yes':
-                                release_plan = prepare_repository_release(repo, folder_path)
-                        except UnknownObjectException:
-                            print_step(f"Creating new repository: {repo_name}...")
-                            repo = user.create_repo(repo_name, private=not is_public)
+                        repo = user.get_repo(repo_name)
+                        repo_exists = True
+                        print_success(f"Targeting: {repo_name}")
+                        show_repository_release(repo)
                         
-                        repo_url = build_authenticated_repo_url(username, repo_name, token)
-                        clean_repo_url = build_clean_repo_url(username, repo_name)
-                        if setup_git_and_push(
-                            folder_path,
-                            repo_url,
-                            clean_repo_url,
-                            commit_msg,
-                        ):
-                            if release_plan:
-                                publish_repository_release(repo, release_plan)
-                            print_success(f"Upload Complete: https://github.com/{username}/{repo_name}")
-                            input("\nPress Enter to return...")
-                            return main() # Full reset
-                    except Exception as e:
-                        print_error(f"Error: {str(e)}")
+                        release_q = [inquirer.List(
+                            'release',
+                            message="Create a release from README changes after upload?",
+                            choices=['Yes', 'No'],
+                            default='No',
+                        )]
+                        release_ans = inquirer.prompt(release_q)
+                        if release_ans and release_ans['release'] == 'Yes':
+                            release_plan = prepare_repository_release(repo, target_folder)
+                    except UnknownObjectException:
+                        print_step(f"Creating new repository: {repo_name}...")
+                        repo = user.create_repo(repo_name, private=not is_public)
+
+                    repo_url = build_authenticated_repo_url(username, repo_name, token)
+                    clean_repo_url = build_clean_repo_url(username, repo_name)
+                    if setup_git_and_push(
+                        target_folder,
+                        repo_url,
+                        clean_repo_url,
+                        commit_msg,
+                    ):
+                        if release_plan:
+                            publish_repository_release(repo, release_plan)
+                        print_success(f"Upload Complete: https://github.com/{username}/{repo_name}")
                         input("\nPress Enter to return...")
-                    break # Break folder loop
-                break # Break repo loop
+                        return main() # Full reset / return to main menu
+                except Exception as e:
+                    print_error(f"Error: {str(e)}")
+                    input("\nPress Enter to return...")
+                break # Break upload loop
             except Exception as e:
                 print_error(f"Session error: {str(e)}")
+                input("\nPress Enter to return...")
                 break
 
 if __name__ == "__main__":

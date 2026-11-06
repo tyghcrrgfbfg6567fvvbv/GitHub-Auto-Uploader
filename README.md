@@ -88,7 +88,24 @@ Updates are never forced over local work. Installation is allowed only when the 
 - Git version control system.
 - A GitHub personal access token with permission to manage the selected repositories.
 
-### Setup
+### Quick Install (Run Anywhere via `github`)
+
+Run the automated installer to set up the tool globally into `~/.Github-Auto-Uploader`:
+
+```bash
+git clone https://github.com/Mr-Risov/GitHub-Auto-Uploader.git ~/.Github-Auto-Uploader
+cd ~/.Github-Auto-Uploader && ./install.sh
+```
+
+Once installed, simply type `github` in ANY project directory:
+
+```bash
+github
+```
+
+> **Typo Tolerant**: Common typos like `gthub`, `gihub`, `gitub`, or `ghub` automatically prompt or launch `github`!
+
+### Manual Setup
 
 1. Clone the repository:
 
