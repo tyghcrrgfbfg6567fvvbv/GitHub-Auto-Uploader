@@ -41,6 +41,7 @@ from .ui.menu import (
     select_repository,
 )
 from .ui.renderer import BoxRow, console, render_box
+from . import __version__
 
 # ==================== UI HELPERS ====================
 
@@ -48,9 +49,9 @@ def print_header(show_upstream=False, update_status=None):
     if console.is_terminal:
         console.clear()
 
-    product_name = Text("GITHUB AUTO UPLOADER  PRO", style="bold white", justify="center")
+    product_name = Text(f"GITHUB AUTO UPLOADER  PRO  v{__version__}", style="bold white", justify="center")
     product_meta = Text(
-        "Repository automation for GitHub",
+        f"Version {__version__} • Repository automation for GitHub",
         style="muted",
         justify="center",
     )
@@ -981,6 +982,7 @@ def show_system_info(username):
     render_box(
         "ACTIVE SESSION",
         [
+            BoxRow("CLI Version", f"v{__version__} (Latest)", "brand"),
             BoxRow("Account", username),
             BoxRow("Runtime", f"Python {sys.version.split()[0]} • {sys.platform}"),
             BoxRow("Workspace", os.path.abspath(os.getcwd())),
