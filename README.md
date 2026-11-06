@@ -86,38 +86,53 @@ Updates are never forced over local work. Installation is allowed only when the 
 
 - Python 3.8 or higher.
 - Git version control system.
-- A GitHub personal access token with permission to manage the selected repositories.
+- A GitHub personal access token with permission to manage repositories.
 
-### ⚡ Quick Install (One-Line Curl)
+---
 
-Install or update with a single command:
+### ⚡ Universal 1-Line Install (Linux / Termux / macOS / Arch Linux)
+
+Install, auto-create `~/myenv`, configure requirements, and launch immediately:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Mr-Risov/GitHub-Auto-Uploader/main/install.sh | bash
 ```
 
-Or with `wget`:
+Or using `wget`:
 
 ```bash
 wget -qO- https://raw.githubusercontent.com/Mr-Risov/GitHub-Auto-Uploader/main/install.sh | bash
 ```
 
-Once installed, simply type `github` in ANY project directory:
+> **Supported OS**:
+> - 🐧 **Linux**: Ubuntu, Debian, Kali, Arch Linux, Manjaro, Fedora, CentOS, RHEL, openSUSE, Alpine
+> - 📱 **Android**: Termux (automatically handles `libsodium` & compiler packages)
+> - 🍎 **macOS**: Apple Silicon & Intel
 
-```bash
-github
+---
+
+### 🪟 Windows (Command Prompt & PowerShell)
+
+In **PowerShell**:
+```powershell
+irm https://raw.githubusercontent.com/Mr-Risov/GitHub-Auto-Uploader/main/install.ps1 | iex
 ```
 
-> **Typo Tolerant**: Common typos like `gthub`, `gihub`, `gitub`, or `ghub` automatically prompt or launch `github`!
-
-### Git Clone Install
-
-If you prefer to clone manually:
-
-```bash
-git clone https://github.com/Mr-Risov/GitHub-Auto-Uploader.git ~/.Github-Auto-Uploader
-cd ~/.Github-Auto-Uploader && ./install.sh
+In **Command Prompt (CMD)**:
+```cmd
+curl -sSL https://raw.githubusercontent.com/Mr-Risov/GitHub-Auto-Uploader/main/install.bat -o install.bat && install.bat
 ```
+
+---
+
+### 🚀 How It Works
+
+1. **Auto OS Detection**: Detects your operating system and package manager.
+2. **Auto Venv (`~/myenv`)**: Checks if a virtualenv exists. If none is found, it automatically creates `~/myenv`.
+3. **Dependency Setup**: Installs and updates all required packages (`inquirer`, `rich`, `PyGithub`, `requests`) inside that virtual environment.
+4. **Auto-Source & Launch**: Launches the uploader immediately using the venv source.
+5. **Universal Execution**: Creates the global `github` executable so next time you type `github` in **ANY** folder, it automatically uses the configured venv source!
+6. **Typo Protection**: Common typos like `gthub`, `gihub`, `gitub`, or `ghub` will automatically prompt or launch `github`.
 
 ### Manual Setup
 
